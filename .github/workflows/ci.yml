@@ -37,4 +37,3 @@ jobs:
       with:
         name: BiglyBT_${{ runner.os }}_JDK_${{ matrix.java-version }}
         path: staging
-
