@@ -73,7 +73,7 @@ public class ConfigSectionConnectionAdvanced
 
 		add(new IntParameterImpl(ICFG_NETWORK_TCP_MAX_CONNECTIONS_OUTSTANDING,
 				"ConfigView.section.connection.network.max.outstanding.connect.attempts",
-				1, 65536), listSocket);
+				1, 100000), listSocket);
 
 		// bind ip
 
