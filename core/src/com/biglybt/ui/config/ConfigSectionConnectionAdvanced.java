@@ -67,7 +67,7 @@ public class ConfigSectionConnectionAdvanced
 
 		add(new IntParameterImpl(ICFG_NETWORK_MAX_SIMULTANEOUS_CONNECT_ATTEMPTS,
 				"ConfigView.section.connection.network.max.simultaneous.connect.attempts",
-				1, 100), listSocket);
+				1, 100000), listSocket);
 
 		// // max pending
 
