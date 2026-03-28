@@ -29,6 +29,7 @@ import org.eclipse.swt.dnd.Transfer;
 import org.eclipse.swt.events.*;
 import org.eclipse.swt.graphics.GC;
 import org.eclipse.swt.graphics.Point;
+import org.eclipse.swt.graphics.RGB;
 import org.eclipse.swt.graphics.Rectangle;
 import org.eclipse.swt.widgets.*;
 
@@ -51,6 +52,7 @@ import com.biglybt.ui.swt.views.table.utils.TableColumnSWTUtils;
 import com.biglybt.pif.download.Download;
 import com.biglybt.pif.ui.menus.MenuManager;
 import com.biglybt.pif.ui.tables.*;
+import com.biglybt.pif.ui.tables.TableColumn;
 
 public abstract class TableViewSWT_Common
 	implements MouseListener, MouseMoveListener, MouseTrackListener, SelectionListener, KeyListener, MenuDetectListener
@@ -1238,6 +1240,109 @@ public abstract class TableViewSWT_Common
 				});
 			}
 				
+				// alignment
+			
+			
+			final MenuItem itemAlign = new MenuItem(menu, SWT.CASCADE);
+			Messages.setLanguageText(itemAlign, "label.alignment"); 
+
+			Menu menuAlign = new Menu(menu.getShell(), SWT.DROP_DOWN);
+			itemAlign.setMenu(menuAlign);
+			
+				// left
+			
+			MenuItem itemAlignLeft = new MenuItem(menuAlign, SWT.RADIO);
+			Messages.setLanguageText(itemAlignLeft, "label.left");
+			itemAlignLeft.addListener(SWT.Selection, (e)->{
+				column.setAlignment( TableColumn.ALIGN_LEAD );
+				column.invalidateCells();
+			});
+			
+				// centre
+				
+			MenuItem itemAlignCentre = new MenuItem(menuAlign, SWT.RADIO);
+			Messages.setLanguageText(itemAlignCentre, "label.center");
+			itemAlignCentre.addListener(SWT.Selection, (e)->{
+				column.setAlignment( TableColumn.ALIGN_CENTER );
+				column.invalidateCells();
+			});
+
+				// right
+				
+			MenuItem itemAlignRight = new MenuItem(menuAlign, SWT.RADIO);
+			Messages.setLanguageText(itemAlignRight, "label.right");
+			itemAlignRight.addListener(SWT.Selection, (e)->{
+				column.setAlignment( TableColumn.ALIGN_TRAIL );
+				column.invalidateCells();
+				column.reset();
+			});
+
+				// def
+			
+			MenuItem itemAlignDefault = new MenuItem(menuAlign, SWT.PUSH);
+			Messages.setLanguageText(itemAlignDefault, "label.default");
+			itemAlignDefault.addListener(SWT.Selection, (e)->{
+				column.reset( false, true, false, false );
+				column.invalidateCells();
+			});
+			
+			int align = column.getAlignment();
+			
+			itemAlignLeft.setSelection( align==TableColumn.ALIGN_LEAD );
+			itemAlignCentre.setSelection( align==TableColumn.ALIGN_CENTER );
+			itemAlignRight.setSelection( align==TableColumn.ALIGN_TRAIL );
+			
+				// colors
+						
+			final MenuItem itemColour = new MenuItem(menu, SWT.CASCADE);
+			Messages.setLanguageText(itemColour, "label.color"); 
+	
+			Menu menuColour = new Menu(menu.getShell(), SWT.DROP_DOWN);
+			itemColour.setMenu(menuColour);
+			
+				// fg
+			
+			MenuItem itemColorFG = new MenuItem(menuColour, SWT.PUSH);
+			Messages.setLanguageText(itemColorFG, "label.foreground.color");
+			itemColorFG.addListener(SWT.Selection, (e)->{
+				int[] existing = column.getForegroundColor();
+				RGB rgb = Utils.showColorDialog( Utils.getDisplay().getActiveShell(), existing==null?null:new RGB(existing[0],existing[1],existing[2]));
+				if ( rgb != null ){
+					column.setForegroundColor(new int[]{rgb.red,rgb.green,rgb.blue});
+					column.invalidateCells();
+						// need this to force column to update :(
+					TableStructureEventDispatcher.getInstance(tv.getTableID()).tableStructureChanged(false, null);
+				}
+			});
+			
+				// bg
+			
+			MenuItem itemColorBG = new MenuItem(menuColour, SWT.PUSH);
+			Messages.setLanguageText(itemColorBG, "label.background.color");
+			itemColorBG.addListener(SWT.Selection, (e)->{
+				int[] existing = column.getBackgroundColor();
+				RGB rgb = Utils.showColorDialog( Utils.getDisplay().getActiveShell(), existing==null?null:new RGB(existing[0],existing[1],existing[2]));
+				if ( rgb != null ){
+					column.setBackgroundColor(new int[]{rgb.red,rgb.green,rgb.blue});
+					column.invalidateCells();
+						// need this to force column to update :(
+					TableStructureEventDispatcher.getInstance(tv.getTableID()).tableStructureChanged(false, null);
+				}
+			});
+
+				// def
+			
+			MenuItem itemColourDefault = new MenuItem(menuColour, SWT.PUSH);
+			Messages.setLanguageText(itemColourDefault, "label.default");
+			itemColourDefault.addListener(SWT.Selection, (e)->{
+				column.reset( false, false, true, true );
+				column.invalidateCells();
+				TableStructureEventDispatcher.getInstance(tv.getTableID()).tableStructureChanged(false, null);
+			});
+			
+				// size to preferred
+			
+			
 			final MenuItem itemPrefSize = new MenuItem(menu, SWT.PUSH);
 			Messages.setLanguageText(itemPrefSize, "table.columns.pref.size");
 			itemPrefSize.addListener(SWT.Selection, e -> Utils.execSWTThread(() -> {
