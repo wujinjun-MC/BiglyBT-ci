@@ -1,0 +1,68 @@
+name: Smart Upstream Sync
+
+on:
+  schedule:
+    # 每小时运行一次 (第 0 分钟)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # 允许手动触发调试
+
+jobs:
+  check-and-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Config git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Check Upstream Status
+        id: check_upstream
+        run: |
+          # 添加上游源（替换为实际的上游地址）
+          UPSTREAM_URL=$(git remote get-url origin | sed 's/\/[^\/]*$/\/UPSTREAM_REPO_NAME_HERE.git/') 
+          # 或者直接硬编码: UPSTREAM_URL="https://github.com/OWNER/REPO.git"
+          
+          git remote add upstream $UPSTREAM_URL
+          git fetch upstream
+
+          # 获取本地分支名 (假设是 main)
+          LOCAL_BRANCH="main"
+          UPSTREAM_BRANCH="upstream/main"
+
+          # 1. 检测是否有落后
+          BEHIND_COUNT=$(git rev-list --count $LOCAL_BRANCH..$UPSTREAM_BRANCH)
+          echo "Behind count: $BEHIND_COUNT"
+
+          if [ "$BEHIND_COUNT" -eq "0" ]; then
+            echo "Already up to date."
+            echo "should_sync=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # 2. 检测上游最后一次提交的时间
+          LAST_COMMIT_TIME=$(git log -1 --format=%ct $UPSTREAM_BRANCH)
+          CURRENT_TIME=$(date +%s)
+          DIFF_SECONDS=$((CURRENT_TIME - LAST_COMMIT_TIME))
+          
+          echo "Last upstream commit was $DIFF_SECONDS seconds ago."
+
+          # 3. 条件判断：落后 > 0 且 距离最后一次提交超过 21600 秒 (6小时)
+          if [ "$DIFF_SECONDS" -gt 21600 ]; then
+            echo "Conditions met. Proceeding to sync."
+            echo "should_sync=true" >> $GITHUB_OUTPUT
+          else
+            echo "Upstream is active within the last hour. Skipping sync to wait for stability."
+            echo "should_sync=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Merge and Push
+        if: steps.check_upstream.outputs.should_sync == 'true'
+        run: |
+          git merge upstream/main --ff-only || git merge upstream/main
+          git push origin main
