@@ -31,8 +31,8 @@ jobs:
           git fetch upstream
 
           # 获取本地分支名 (假设是 main)
-          LOCAL_BRANCH="main"
-          UPSTREAM_BRANCH="upstream/main"
+          LOCAL_BRANCH="master"
+          UPSTREAM_BRANCH="upstream/master"
 
           # 1. 检测是否有落后
           BEHIND_COUNT=$(git rev-list --count $LOCAL_BRANCH..$UPSTREAM_BRANCH)
