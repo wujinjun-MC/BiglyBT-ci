@@ -24,6 +24,10 @@ jobs:
       - name: Check Upstream Status
         id: check_upstream
         run: |
+          # 添加上游源（替换为实际的上游地址）
+          UPSTREAM_URL="https://github.com/BiglySoftware/BiglyBT.git"
+
+          git remote add upstream $UPSTREAM_URL
           git fetch upstream
 
           # 获取本地分支名 (假设是 main)
