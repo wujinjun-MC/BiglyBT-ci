@@ -25,8 +25,7 @@ jobs:
         id: check_upstream
         run: |
           # 添加上游源（替换为实际的上游地址）
-          UPSTREAM_URL=$(git remote get-url origin | sed 's/\/[^\/]*$/\/BiglyBT.git/') 
-          # 或者直接硬编码: UPSTREAM_URL="https://github.com/OWNER/REPO.git"
+          UPSTREAM_URL=$(git remote get-url origin | sed 's/\/[^\/]*$/\/BiglyBT-ci.git/') 
           
           git remote add upstream $UPSTREAM_URL
           git fetch upstream
