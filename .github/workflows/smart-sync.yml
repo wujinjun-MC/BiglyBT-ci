@@ -63,5 +63,5 @@ jobs:
       - name: Merge and Push
         if: steps.check_upstream.outputs.should_sync == 'true'
         run: |
-          git merge upstream/main --ff-only || git merge upstream/main
-          git push origin main
+          git merge upstream/master --ff-only || git merge upstream/master
+          git push origin master
