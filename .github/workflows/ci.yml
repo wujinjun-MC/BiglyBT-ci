@@ -6,6 +6,10 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+  workflow_run:
+    workflows: ["Smart Upstream Sync"] # 这里填同步工作流的 name
+    types:
+      - completed
   workflow_dispatch:
 
 jobs:
