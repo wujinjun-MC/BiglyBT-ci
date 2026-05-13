@@ -165,7 +165,7 @@ public class ConfigSectionTrackerClient
 				listOverride);
 
 		add(new IntParameterImpl(ICFG_TRACKER_CLIENT_NUMWANT_LIMIT,
-				"ConfigView.label.maxnumwant", 0, 100), Parameter.MODE_INTERMEDIATE,
+				"ConfigView.label.maxnumwant", 0, 99999), Parameter.MODE_INTERMEDIATE,
 				listOverride);
 
 		add(new IntParameterImpl(ICFG_TRACKER_CLIENT_MIN_ANNOUNCE_INTERVAL,
