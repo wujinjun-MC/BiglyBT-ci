@@ -52,11 +52,11 @@ jobs:
           echo "Last upstream commit was $DIFF_SECONDS seconds ago."
 
           # 3. 条件判断：落后 > 0 且 距离最后一次提交超过 21600 秒 (6小时)
-          if [ "$DIFF_SECONDS" -gt 21600 ]; then
+          if [ "$GITHUB_EVENT_NAME"x = "workflow_dispatch"x || "$DIFF_SECONDS" -gt 21600 ]; then
             echo "Conditions met. Proceeding to sync."
             echo "should_sync=true" >> $GITHUB_OUTPUT
           else
-            echo "Upstream is active within the last hour. Skipping sync to wait for stability."
+            echo "Upstream is active within 6 hours. Skipping sync to wait for stability."
             echo "should_sync=false" >> $GITHUB_OUTPUT
           fi
 
