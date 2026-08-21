@@ -73,12 +73,12 @@ public class TorrentUIUtilsV3
 
 	private static final Pattern hashPattern = Pattern.compile("download/([A-Z0-9]{32})\\.torrent");
 
-	static ImageLoader imageLoaderThumb;
+	static ImageLoader _imageLoaderThumb =  new ImageLoader(null, null);
 
 	public static void disposeStatic() {
-		if (imageLoaderThumb != null) {
-			imageLoaderThumb.dispose();
-			imageLoaderThumb = null;
+		if (_imageLoaderThumb != null) {
+			_imageLoaderThumb.dispose();
+			_imageLoaderThumb = null;
 		}
 	}
 
@@ -314,10 +314,13 @@ public class TorrentUIUtilsV3
 			return null;
 		}
 
-		if (imageLoaderThumb == null) {
-			imageLoaderThumb = new ImageLoader(null, null);
+		ImageLoader imageLoaderThumb = _imageLoaderThumb;
+				
+		if ( imageLoaderThumb == null ){
+			
+			return( null );
 		}
-
+		
 		String thumbnailUrl = PlatformTorrentUtils.getContentThumbnailUrl(torrent);
 
 		//System.out.println("thumburl= " + thumbnailUrl);
@@ -393,10 +396,14 @@ public class TorrentUIUtilsV3
 			 */
 
 			String path = null;
+			Boolean isFile;
 			if (dm == null) {
 				TOTorrentFile[] files = torrent.getFiles();
 				if (files.length > 0) {
 					path = files[0].getRelativePath();
+					isFile = true;
+				}else{
+					isFile = null;
 				}
 			} else {
 				path = dm.getDownloadState().getPrimaryFilePath();
@@ -404,6 +411,9 @@ public class TorrentUIUtilsV3
 				//path = primaryFile == null ? null : primaryFile.getFile(true).getName();
 				if ( path == null ){
 					path = dm.getSaveLocation().getAbsolutePath();
+					isFile = torrent.isSimpleTorrent();
+				}else{
+					isFile = true;
 				}
 			}
 			if (path != null) {
@@ -413,20 +423,22 @@ public class TorrentUIUtilsV3
 					// placeholder gets cached below and nothing would replace it.
 					// when the real one turns up, refresh the cached thumbnail and
 					// let the listener repaint the cell
-				image = ImageRepository.getPathIcon(path, big, false,
-						()->{
+				image = ImageRepository.getPathIcon(path, isFile, big, false,
+						(result)->{
 							Utils.execSWTThread(()->{
-								Image late = ImageRepository.getPathIcon( icon_path, big, false );
-								if ( late != null && !late.isDisposed() && imageLoaderThumb != null ){
+								if ( result != null ){
 																			
-									imageLoaderThumb.replaceImageNoDipose( id, late );
+									imageLoaderThumb.replaceImageNoDipose( id, result );
 								}
-								l.contentImageLoaded( late, false );
+								l.contentImageLoaded( result, false );
 							});
 						});
 
 				if (image != null && !torrent.isSimpleTorrent()) {
-					Image parentPathIcon = ImageRepository.getPathIcon(new File(path).getParent(), false, false);
+					
+					imageLoaderThumb.addImageNoDipose(id, image);
+					
+					Image parentPathIcon = ImageRepository.getPathIcon(new File(path).getParent(), isFile, false, false);
 					Image[] images = parentPathIcon == null || parentPathIcon.isDisposed()
 							? new Image[] {
 								image
@@ -452,7 +464,12 @@ public class TorrentUIUtilsV3
 		return new Image[] { image };
 	}
 
-	public static void releaseContentImage(Object datasource) {
+	public static void 
+	releaseContentImage(
+		Object datasource) 
+	{
+		ImageLoader imageLoaderThumb = _imageLoaderThumb;
+
 		if (imageLoaderThumb == null) {
 			return;
 		}

@@ -163,9 +163,9 @@ public class NameItem extends CoreTableColumnSWT implements
 					// Don't ever dispose of PathIcon, it's cached and may be used elsewhere
 					TOTorrent torrent = dm.getTorrent();
 					Image icon = ImageRepository.getPathIcon(
-							fileInfo.getFile(true).getPath(), false, torrent != null
+							fileInfo.getFile(true).getPath(), true, false, torrent != null
 									&& !torrent.isSimpleTorrent(),
-							()->{
+							(result)->{
 									// the icon arrived after this cell had already
 									// painted; the name hasn't changed so nothing
 									// would ask for it again. invalidate and let the
