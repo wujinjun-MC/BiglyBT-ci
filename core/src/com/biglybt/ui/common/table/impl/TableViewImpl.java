@@ -692,7 +692,7 @@ public abstract class TableViewImpl<DATASOURCETYPE>
 	}
 
 	@SuppressWarnings("unchecked")
-	public boolean refilter() {
+	public boolean refilter( boolean auto ){
 		if (filter == null) {
 			return false;
 		}
@@ -780,8 +780,12 @@ public abstract class TableViewImpl<DATASOURCETYPE>
 			redrawTable();
 		}
 
-		processDataSourceQueue(true);
-		return changed;
+			// only refocus if changed, it is annoying to have an auto-refilter bring a row
+			// back into view if it has been scrolled out of view
+		
+		processDataSourceQueue( !auto || changed);
+		
+		return( changed );
 	}
 
 	public boolean
@@ -1078,9 +1082,18 @@ public abstract class TableViewImpl<DATASOURCETYPE>
 
 	// @see TableView#dataSourceExists(java.lang.Object)
 	@Override
-	public boolean dataSourceExists(DATASOURCETYPE dataSource) {
+	public boolean
+	hasDataSourceBeenAdded(
+		DATASOURCETYPE dataSource, 
+		boolean include_filtered )
+	{
 		synchronized (rows_sync) {
-			return mapDataSourceToRow.containsKey(dataSource) || dataSourcesToAdd.containsKey(dataSource);
+			if ( include_filtered ){
+				return listUnfilteredDataSources.containsKey(dataSource) || dataSourcesToAdd.containsKey(dataSource);
+
+			}else{
+				return mapDataSourceToRow.containsKey(dataSource) || dataSourcesToAdd.containsKey(dataSource);
+			}
 		}
 	}
 

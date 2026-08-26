@@ -25,7 +25,6 @@ import java.net.URL;
 import java.util.List;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Pattern;
 
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.dnd.*;
@@ -40,7 +39,6 @@ import com.biglybt.core.category.Category;
 import com.biglybt.core.category.CategoryManager;
 import com.biglybt.core.config.COConfigurationManager;
 import com.biglybt.core.config.ParameterListener;
-import com.biglybt.core.content.RelatedContent;
 import com.biglybt.core.disk.DiskManagerFileInfo;
 import com.biglybt.core.disk.DiskManagerFileInfoSet;
 import com.biglybt.core.download.DownloadManager;
@@ -1665,6 +1663,10 @@ public class MyTorrentsView
 						}
 						case "f":{
 					
+								// too inefficient to have this when matching on file names
+							
+							col_filter_helper.setAutoRefilterEnabled( false );
+							
 							boolean absolute = currentSearch.contains( File.separator );
 							
 							DiskManagerFileInfoSet file_set = dm.getDiskManagerFileInfoSet();
@@ -1672,11 +1674,9 @@ public class MyTorrentsView
 							DiskManagerFileInfo[] files = file_set.getFiles();
 	
 							for ( DiskManagerFileInfo f: files ){
-	
-								File file = f.getFile(true);
-	
-								String name = absolute?file.getAbsolutePath():file.getName();
-	
+		
+								String name = absolute?f.getFile( true ).getAbsolutePath():f.getFileName( true );
+									
 								result.add( name );
 							}
 							
@@ -1711,10 +1711,28 @@ public class MyTorrentsView
 					return( result );
 				};
 				
+				String actualFilter;
+				
+				if ( defaultFilterPrefix.isEmpty()){
+					
+					actualFilter = currentSearch;
+					
+				}else{
+					
+					if ( currentSearch.contains( ":" )){
+						
+						actualFilter = defaultFilterPrefix + "+" + currentSearch;
+						
+					}else{
+					
+						actualFilter = defaultFilterPrefix + currentSearch;
+					}
+				}
+				
 				bOurs = 
 					col_filter_helper.filterCheck( 
 							dm, 
-							defaultFilterPrefix + currentSearch, 
+							actualFilter, 
 							regexSearch, 
 							mt_provider, 
 							confusable, 
@@ -3642,7 +3660,23 @@ public class MyTorrentsView
 	taggableSync(
 		Tag 		tag )
 	{
-		// request to fully resync this tag
+		if ( tag instanceof Category ){
+			
+			if (((Category)tag).getType() == Category.TYPE_ALL ){
+				
+					// this is the default Tag for all views when other tags not selected
+					// membership always full, nothing to do.
+				
+				return;
+			}
+		}
+		
+		if ( col_filter_helper != null && !col_filter_helper.getAutoRefilterEnabled()){
+			
+			return;
+		}
+		
+			// request to fully resync this tag
 
 		Collection<DownloadManager> dataSources = tv.getDataSources();
 
@@ -3658,7 +3692,7 @@ public class MyTorrentsView
 
 			DownloadManager	manager = (DownloadManager)t;
 
-			if ( isOurDownloadManager( manager ) && !tv.dataSourceExists(manager)){
+			if ( isOurDownloadManager( manager ) && !tv.hasDataSourceBeenAdded(manager, true )){
 
 				tv.addDataSource(manager);
 			}
