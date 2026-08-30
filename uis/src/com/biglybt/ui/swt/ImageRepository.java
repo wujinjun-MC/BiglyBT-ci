@@ -53,6 +53,7 @@ import com.biglybt.core.util.HostNameToIPResolver;
 import com.biglybt.core.util.RandomUtils;
 import com.biglybt.core.util.SHA1Simple;
 import com.biglybt.core.util.StringInterner;
+import com.biglybt.core.util.SystemProperties;
 import com.biglybt.core.util.SystemTime;
 import com.biglybt.pif.peers.Peer;
 import com.biglybt.pif.utils.LocationProvider;
@@ -92,6 +93,209 @@ public class ImageRepository
 
 	private static final int	PER_FILE_CACHE_MAX = 1024;
 
+		// per-file icons survive a restart. the in-memory cache already
+		// collapses identical icons onto one content key, so the disk layout
+		// follows it: one file per *distinct* icon plus a small index mapping
+		// files onto them. a library of thousands of installers usually needs
+		// only a few dozen icon files.
+		//
+		// the index is keyed by a hash of the path rather than the path itself,
+		// so it stays compact and doesn't write user paths out in the clear.
+
+	private static final int	DISK_INDEX_MAX = 4096;
+
+	private static final File	disk_cache_dir =
+		FileUtil.newFile( SystemProperties.getUserPath(), "cache", "fileicons" );
+
+	private static final int	disk_image_format = Constants.isWindows ? SWT.IMAGE_ICO : SWT.IMAGE_PNG;
+	private static final String	disk_image_ext    = Constants.isWindows ? ".ico" : ".png";
+
+		// path hash -> "<content key> <modified> <length>"
+
+	private static Map<String,String>	disk_index;
+
+		// names present in the cache directory, so testing for an icon doesn't
+		// hit the filesystem; same approach ImageLoader takes for its own cache
+
+	private static Set<String>			disk_files;
+
+	private static volatile boolean		disk_index_dirty;
+
+		// the index is read on the background dispatcher: listing the directory
+		// and reading the file is disk work, and doing it inline would block the
+		// first paint. until it has been read, lookups simply miss and fall
+		// through to the shell, which is what would have happened anyway.
+
+	private static volatile boolean		disk_init_done;
+	private static boolean				disk_init_started;
+
+	private static final AsyncDispatcher	disk_dispatcher = new AsyncDispatcher( "FileIconDisk" );
+
+		// returns true once the on-disk index is available; kicks off the read
+		// the first time it is asked
+
+	private static boolean
+	ensureDiskCache()
+	{
+		if ( disk_init_done ){
+
+			return( true );
+		}
+
+		synchronized( ImageRepository.class ){
+
+			if ( disk_init_started ){
+
+				return( false );
+			}
+
+			disk_init_started = true;
+		}
+
+		disk_dispatcher.dispatch(()->{
+
+			synchronized( ImageRepository.class ){
+
+				initDiskCache();
+			}
+
+			disk_init_done = true;
+		});
+
+		return( false );
+	}
+
+	static{
+			// pre-init otherwise high chance initial icon load from disk will fail
+			// and ultimately ends up causing a rewrite of the (already existing)
+			// file cache when it finally turns up
+		
+		ensureDiskCache();
+	}
+	
+		// caller must hold the ImageRepository.class monitor
+
+	private static void
+	initDiskCache()
+	{
+		if ( disk_index != null ){
+
+			return;
+		}
+
+		Set<String> names = new HashSet<>();
+
+		File[] files = disk_cache_dir.listFiles();
+
+		if ( files != null ){
+
+			for ( File f: files ){
+
+				names.add( f.getName());
+			}
+		}
+
+		disk_files = names;
+
+		Map<String,String> loaded =
+			new LinkedHashMap<String,String>( 128, 0.75f, true )
+			{
+				@Override
+				protected boolean
+				removeEldestEntry(
+					Map.Entry<String,String> eldest )
+				{
+					if ( size() > DISK_INDEX_MAX ){
+
+						disk_index_dirty = true;
+
+						return( true );
+					}
+
+					return( false );
+				}
+			};
+
+		disk_index = loaded;
+
+		if ( !names.isEmpty()){
+			
+			try{
+				Map<String,Object> stored = FileUtil.readResilientFile( disk_cache_dir, "index", false );
+	
+				Object entries = stored.get( "entries" );
+	
+				if ( entries instanceof Map ){
+	
+					for ( Map.Entry<?,?> e: ((Map<?,?>)entries).entrySet()){
+	
+						Object v = e.getValue();
+	
+						loaded.put(
+							String.valueOf( e.getKey()),
+							v instanceof byte[]? new String((byte[])v, Constants.UTF_8 ): String.valueOf( v ));
+					}
+				}
+			}catch( Throwable e ){
+	
+					// a damaged index just means a cold cache
+			}	
+	
+				// entries age out of the index, but the icons they pointed at would
+				// otherwise sit in the directory forever; drop any that nothing
+				// refers to any more
+	
+			Set<String> referenced = new HashSet<>();
+	
+			for ( String entry: loaded.values()){
+	
+				int pos = entry.indexOf( ' ' );
+	
+				if ( pos > 0 ){
+	
+					referenced.add( getDiskImageName( entry.substring( 0, pos )));
+				}
+			}
+	
+			for ( String name: new java.util.ArrayList<>( names )){
+	
+				if ( name.equals( "index" ) || name.startsWith( "index." )){
+	
+					continue;
+				}
+	
+				if ( !referenced.contains( name )){
+	
+					if ( FileUtil.newFile( disk_cache_dir, name ).delete()){
+	
+						names.remove( name );
+					}
+				}
+			}
+		}
+	}
+
+		// derived from the key itself rather than from separately passed flags,
+		// so the two can't drift apart
+
+	private static String
+	getDiskKey(
+		File			file,
+		IconFileKey		file_key )
+	{
+		String str = file.getAbsolutePath() + "-" + file_key.modifier;
+
+		return( ByteFormatter.encodeString( new SHA1Simple().calculateHash( str.getBytes( Constants.UTF_8 ))));
+	}
+
+	private static String
+	getDiskImageName(
+		String		content_key )
+	{
+		return( content_key.substring( content_key.indexOf( ':' ) + 1 ) + disk_image_ext );
+	}
+
+
 		// marks a file whose icon lookup came back empty, so a failure doesn't
 		// have every repaint queue the lookup again; the entry ages out of the
 		// map normally, which lets a file that has become reachable retry
@@ -99,6 +303,12 @@ public class ImageRepository
 	private static final int	PFC_NONE	= 0;
 	private static final int	PFC_OK		= 1;
 	private static final int	PFC_TIMEOUT	= 2;
+
+		// a lookup that couldn't start because another was running. unlike a
+		// timeout this says nothing about the file being slow, so it is worth
+		// retrying almost immediately rather than after the timeout backoff.
+
+	private static final int	PFC_BUSY	= 3;
 	
 	
 	private static final Map<IconFileKey,PerFileContent>	per_file_content_keys =
@@ -182,6 +392,12 @@ public class ImageRepository
 		boolean 			minifolder,
 		Consumer<PathIcon>	icon_listener ) 
 	{
+			// when nothing can be resolved we fall back to a stand-in; for a
+			// directory that has to be the folder icon, since callers can't tell
+			// the transparent one apart from a real answer and will cache it
+
+		String fallback_key = ( minifolder || ext.equals( "-folder" ))? "folder": "transparent";
+
 		Image image = null;
 
 		try {
@@ -231,7 +447,7 @@ public class ImageRepository
 					
 				}else{
 					
-					default_image = ImageLoader.getInstance().getImage( minifolder ? "folder" : "transparent" );
+					default_image = ImageLoader.getInstance().getImage( fallback_key );
 				}
 				
 				if ( pfc != null ){
@@ -246,13 +462,23 @@ public class ImageRepository
 	
 							if ( ImageLoader.isRealImage( image )){
 								
-								return( new PathIcon( image, pfc.type != PFC_TIMEOUT ));
+								return( new PathIcon( image, pfc.type == PFC_TIMEOUT ));
 							}
 						}
 
 						scheduleAsyncIconFetch( file, file_key, bBig, minifolder, default_image, icon_listener );
 					}
 				}else{
+
+						// nothing in memory, but it may have been resolved in an
+						// earlier session
+
+					Image from_disk = getIconFromDisk( file, file_key );
+					
+					if ( from_disk != null ){
+
+						return( new PathIcon( from_disk ));
+					}
 
 					scheduleAsyncIconFetch( file, file_key, bBig, minifolder, default_image, icon_listener );
 				}
@@ -289,7 +515,7 @@ public class ImageRepository
 				
 				if ( pending_image == null ){
 					
-					pending_image = ImageLoader.getInstance().getImage( minifolder ? "folder" : "transparent" );
+					pending_image = ImageLoader.getInstance().getImage( fallback_key );
 				}
 
 				return( new PathIcon( pending_image, true ));
@@ -307,8 +533,23 @@ public class ImageRepository
 			}
 
 			image = null;
+		
+			boolean responding = Utils.isFileResponding( file );
+			
+			if ( responding ){
 
-			if ( Utils.isFileResponding( file )){
+					// a directory that isn't there yet can't be asked about: the shell
+					// call sets SHGFI_USEFILEATTRIBUTES for a missing path and the
+					// attributes handed to it come from file.isDirectory(), which is
+					// false for something that doesn't exist. it then returns the
+					// icon for a plain file, and since folder icons are cached under
+					// one shared key that answer becomes the folder icon for every
+					// row until the client restarts.
+
+				if ( ext.equals( "-folder" ) && !file.exists()){
+					
+					return( new PathIcon( ImageLoader.getInstance().getImage( "folder" )));
+				}
 
 				ImageData imageData = null;
 
@@ -318,7 +559,7 @@ public class ImageRepository
 					
 					if ( ignore_icon_exts.contains( ext.toLowerCase( Locale.US  ))){
 						
-						return( new PathIcon( ImageLoader.getInstance().getImage(minifolder ? "folder" : "transparent")));
+						return( new PathIcon( ImageLoader.getInstance().getImage( fallback_key )));
 					}
 					
 					try {
@@ -390,13 +631,23 @@ public class ImageRepository
 					ImageLoader.getInstance().addImageNoDipose(key, image);
 				}
 			}
-		} catch (Throwable e) {
+		}catch( Throwable e ){
+			
 			// seen exceptions thrown here, due to images.get failing in Program.hashCode
 			// ignore and use default icon
 		}
 
 		if (image == null) {
-			return( new PathIcon( ImageLoader.getInstance().getImage(minifolder ? "folder" : "transparent")));
+			
+			// not responding or failed for some other reason
+			// assume it doesn't exist for folder icon purposes
+			
+			if ( ext.equals( "-folder" )){
+				
+				return( new PathIcon( ImageLoader.getInstance().getImage( "folder" )));
+			}
+
+			return( new PathIcon( ImageLoader.getInstance().getImage( fallback_key )));
 		}
 		return( new PathIcon( image ));
 	}
@@ -404,6 +655,311 @@ public class ImageRepository
 		// resolve a per-file icon without blocking the interface: the (potentially
 		// slow) file existence check runs on a background thread, the icon lookup
 		// itself is then handed to the SWT thread as getFileIcon requires
+
+	private static void
+	saveDiskIndex()
+	{
+		synchronized( ImageRepository.class ){
+
+			disk_index_dirty = true;
+		}
+
+		disk_dispatcher.dispatch(()->{
+
+			Map<String,String>	copy;
+
+			synchronized( ImageRepository.class ){
+
+				if ( !disk_index_dirty || disk_index == null ){
+
+					return;
+				}
+
+				disk_index_dirty = false;
+
+				copy = new LinkedHashMap<>( disk_index );
+			}
+
+			try{
+				Map<String,Object>	entries = new HashMap<>();
+
+				for ( Map.Entry<String,String> e: copy.entrySet()){
+
+					entries.put( e.getKey(), e.getValue().getBytes( Constants.UTF_8 ));
+				}
+
+				Map<String,Object>	stored = new HashMap<>();
+
+				stored.put( "entries", entries );
+
+				disk_cache_dir.mkdirs();
+
+				FileUtil.writeResilientFile( disk_cache_dir, "index", stored, false );
+
+			}catch( Throwable e ){
+
+				Debug.out( e );
+			}
+		});
+	}
+
+		// hands back a cached icon if we have one for this file, and kicks off a
+		// background check that the file hasn't changed since it was stored.
+		// checking before returning would put the disk access we're avoiding
+		// straight back onto the UI thread.
+
+	private static Image
+	getIconFromDisk(
+		File			file,
+		IconFileKey		file_key )
+	{
+		try{
+			if ( !ensureDiskCache()){
+
+				return( null );
+			}
+
+			String		disk_key;
+			String		entry;
+
+			synchronized( ImageRepository.class ){
+
+				disk_key = getDiskKey( file, file_key );
+
+				entry = disk_index.get( disk_key );
+			}
+
+			if ( entry == null ){
+
+				return( null );
+			}
+
+			String[] bits = entry.split( " " );
+
+			if ( bits.length != 3 ){
+
+				return( null );
+			}
+
+			String content_key = bits[0];
+
+			Image image = ImageLoader.getInstance().getImage( content_key );
+
+			if ( !ImageLoader.isRealImage( image )){
+
+				ImageLoader.getInstance().releaseImage( content_key );
+
+				image = loadDiskImage( content_key );
+
+				if ( image == null ){
+
+					synchronized( ImageRepository.class ){
+
+						disk_index.remove( disk_key );
+					}
+
+					saveDiskIndex();
+
+					return( null );
+				}
+
+				ImageLoader.getInstance().addImageNoDipose( content_key, image );
+			}
+
+			synchronized( per_file_content_keys ){
+
+				per_file_content_keys.put( file_key, new PerFileContent( PFC_OK, content_key ));
+			}
+
+			scheduleDiskStaleCheck( file, file_key, disk_key, bits[1], bits[2] );
+
+			return( image );
+
+		}catch( Throwable e ){
+
+			return( null );
+		}
+	}
+
+		// this does read a file on the SWT thread, which is deliberate: the
+		// point of the cache is to hand the icon back synchronously, and it is
+		// a few KB from our own directory on the local disk. the shell call it
+		// replaces is the one that can block for seconds on a dead share.
+
+	private static Image
+	loadDiskImage(
+		String		content_key )
+	{
+		String name = getDiskImageName( content_key );
+
+		synchronized( ImageRepository.class ){
+
+			if ( !disk_files.contains( name )){
+
+				return( null );
+			}
+		}
+
+		File file = FileUtil.newFile( disk_cache_dir, name );
+
+		InputStream is = null;
+
+		try{
+			is = FileUtil.newFileInputStream( file );
+
+			return( new Image( Display.getDefault(), is ));
+
+		}catch( Throwable e ){
+
+				// truncated or corrupt, treat as a miss and let it be written again
+
+			file.delete();
+
+			synchronized( ImageRepository.class ){
+
+				disk_files.remove( name );
+			}
+
+			return( null );
+
+		}finally{
+
+			if ( is != null ){
+
+				try{ is.close(); }catch( Throwable f ){}
+			}
+		}
+	}
+
+		// called on the SWT thread, so the only thing done here is pulling the
+		// pixels out of the Image - an SWT operation that has to happen on this
+		// thread. serialising them, writing the file and stat'ing the source all
+		// go to the background dispatcher, since none of it belongs on the UI
+		// thread.
+
+	private static void
+	storeIconOnDisk(
+		File			file,
+		IconFileKey		file_key,
+		String			content_key,
+		Image			icon )
+	{
+		final String	name = getDiskImageName( content_key );
+
+			// kick the index read off if it hasn't run yet. the dispatcher is
+			// sequential, so the work queued below lands after it and nothing
+			// is lost while the cache is warming up.
+
+		ensureDiskCache();
+
+		final ImageData data;
+
+		try{
+			data = icon.getImageData();
+
+		}catch( Throwable e ){
+
+			return;
+		}
+
+		disk_dispatcher.dispatch(()->{
+
+			boolean have_image;
+
+			synchronized( ImageRepository.class ){
+
+				if ( disk_index == null ){
+
+					return;
+				}
+
+				have_image = disk_files.contains( name );
+			}
+
+			if ( !have_image ){
+
+				try{
+					org.eclipse.swt.graphics.ImageLoader saver = new org.eclipse.swt.graphics.ImageLoader();
+
+					saver.data = new ImageData[]{ data };
+
+					ByteArrayOutputStream baos = new ByteArrayOutputStream();
+
+					saver.save( baos, disk_image_format );
+
+					disk_cache_dir.mkdirs();
+
+					FileUtil.writeBytesAsFile( FileUtil.newFile( disk_cache_dir, name ).getAbsolutePath(), baos.toByteArray());
+
+					synchronized( ImageRepository.class ){
+
+						disk_files.add( name );
+					}
+				}catch( Throwable e ){
+
+						// failing to persist isn't fatal, the memory cache still works
+
+					return;
+				}
+			}
+
+			try{
+				String disk_key = getDiskKey( file, file_key );
+
+				String entry = content_key + " " + file.lastModified() + " " + file.length();
+
+				synchronized( ImageRepository.class ){
+
+					disk_index.put( disk_key, entry );
+				}
+
+				saveDiskIndex();
+
+			}catch( Throwable e ){
+			}
+		});
+	}
+
+	private static void
+	scheduleDiskStaleCheck(
+		File			file,
+		IconFileKey		file_key,
+		String			disk_key,
+		String			modified,
+		String			length )
+	{
+		disk_dispatcher.dispatch(()->{
+
+			try{
+				if ( !Utils.fileExistsWithTimeout( file )){
+
+					return;
+				}
+
+				if ( 	String.valueOf( file.lastModified()).equals( modified ) &&
+						String.valueOf( file.length()).equals( length )){
+
+					return;
+				}
+
+					// the file has been replaced since the icon was stored
+
+				synchronized( ImageRepository.class ){
+
+					disk_index.remove( disk_key );
+				}
+
+				synchronized( per_file_content_keys ){
+
+					per_file_content_keys.remove( file_key );
+				}
+
+				saveDiskIndex();
+
+			}catch( Throwable e ){
+			}
+		});
+	}
 
 	private static void
 	scheduleAsyncIconFetch(
@@ -475,6 +1031,7 @@ public class ImageRepository
 
 					Image icon = null;
 					boolean	timeout = false;
+					boolean	busy	= false;
 					
 					if ( Constants.isWindows ){
 						try{
@@ -484,6 +1041,7 @@ public class ImageRepository
 							if ( temp != null ){
 								icon = (Image)temp[0];
 								timeout = (Boolean)temp[1];
+								busy = (Boolean)temp[2];
 							}
 						}catch( Throwable e ){
 						}
@@ -510,9 +1068,32 @@ public class ImageRepository
 							result[0] = new PathIcon( default_icon, timeout );
 						}
 
+							// a timeout, or a lookup that couldn't run because
+							// another was in progress, says nothing about the
+							// file: record it as retryable. only a lookup that
+							// ran and came back empty means there is no icon.
+
 						synchronized( per_file_content_keys ){
 						
-							per_file_content_keys.put( file_key, new PerFileContent( PFC_NONE, null ));
+							int type = busy? PFC_BUSY: timeout? PFC_TIMEOUT: PFC_NONE;
+							
+							if ( type == PFC_NONE ){
+								
+								per_file_content_keys.put( file_key, new PerFileContent( PFC_NONE, null ));
+								
+							}else{
+								
+								PerFileContent pfc = per_file_content_keys.get( file_key );
+								
+								if ( pfc != null && pfc.type == type ){
+									
+									pfc.setFailed();
+									
+								}else{
+									
+									per_file_content_keys.put( file_key, new PerFileContent( type, null ));
+								}
+							}
 						}
 					}
 				}, false );
@@ -602,6 +1183,8 @@ public class ImageRepository
 					per_file_content_keys.put( file_key, pfc );
 				}
 
+				storeIconOnDisk( file, file_key, content_key, existing );
+
 				return( existing );
 			}
 
@@ -616,6 +1199,8 @@ public class ImageRepository
 			
 				per_file_content_keys.put( file_key, new PerFileContent( PFC_OK, content_key ));
 			}
+			
+			storeIconOnDisk( file, file_key, content_key, icon );
 			
 			return( icon );
 			
@@ -1227,7 +1812,10 @@ public class ImageRepository
 		final int		type;
 		final String	key;
 		
-		int		fail_count;
+			// written under the per_file_content_keys monitor but read by
+			// canRetry() outside it, so make the read see the current value
+
+		volatile int	fail_count;
 		
 		PerFileContent(
 			int		_type,
@@ -1236,7 +1824,7 @@ public class ImageRepository
 			type	= _type;
 			key		= _key;
 			
-			if ( type == PFC_TIMEOUT ){
+			if ( type == PFC_TIMEOUT || type == PFC_BUSY ){
 				
 				fail_count = 1;
 			}
@@ -1254,11 +1842,20 @@ public class ImageRepository
 		boolean
 		canRetry()
 		{
+			long elapsed = SystemTime.getMonotonousTime() - time;
+
 			if ( type == PFC_TIMEOUT ){
 				
-				long elapsed = SystemTime.getMonotonousTime() - time;
-				
 				long delay = fail_count * ( 30*1000 + RandomUtils.nextInt( 10*1000 ));
+				
+				return( elapsed > delay );
+				
+			}else if ( type == PFC_BUSY ){
+				
+					// the queue is serialised, so the next slot comes round
+					// quickly; back off a little if it keeps missing
+
+				long delay = Math.min( fail_count, 10 ) * ( 1000 + RandomUtils.nextInt( 500 ));
 				
 				return( elapsed > delay );
 				

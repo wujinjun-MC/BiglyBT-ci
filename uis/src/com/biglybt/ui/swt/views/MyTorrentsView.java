@@ -228,7 +228,8 @@ public class MyTorrentsView
 
 	private volatile int[]	dmCounts = new int[3];
 	private AtomicInteger	dmCountMutations	= new AtomicInteger(0);
-	private volatile int	dmCountLast			= -1;
+	private volatile int	dmCountLast1			= -1;
+	private volatile int	dmCountLast2			= -1;
 
 	private final Set<TableRowCore> listRowsToRefresh = new HashSet<>();
 
@@ -556,7 +557,7 @@ public class MyTorrentsView
 						
 						int	mut = dmCountMutations.get();
 								
-						if ( mut != dmCountLast ){
+						if ( mut != dmCountLast1 ){
 							
 							int active 	= 0;
 							int	queued	= 0;
@@ -579,7 +580,7 @@ public class MyTorrentsView
 							
 							dmCounts = new int[]{ dms.size(), active, queued };
 							
-							dmCountLast = mut;
+							dmCountLast1 = mut;
 						}
 						
 						return( dmCounts );
@@ -1853,23 +1854,30 @@ public class MyTorrentsView
 		
 		if ( !filterParent.isDisposed()){
 
-			TableRowCore[] rows = view.getRows();
-
-			int	active = 0;
-
-			for ( TableRowCore row: rows ){
-
-				DownloadManager dm = (DownloadManager)row.getDataSource( true );
-
-				int	state = dm.getState();
-
-				if ( state == DownloadManager.STATE_DOWNLOADING || state == DownloadManager.STATE_SEEDING ){
-
-					active++;
+			int	mut = dmCountMutations.get();
+			
+			if ( mut != dmCountLast2 ){
+				
+				dmCountLast2 = mut;
+				
+				TableRowCore[] rows = view.getRows();
+	
+				int	active = 0;
+	
+				for ( TableRowCore row: rows ){
+	
+					DownloadManager dm = (DownloadManager)row.getDataSource( true );
+	
+					int	state = dm.getState();
+	
+					if ( state == DownloadManager.STATE_DOWNLOADING || state == DownloadManager.STATE_SEEDING ){
+	
+						active++;
+					}
 				}
+	
+				vtxi.searchUpdate( tv.getComposite(), rows.length, active );
 			}
-
-			vtxi.searchUpdate( tv.getComposite(), rows.length, active );
 		}
 	}
 
@@ -4031,9 +4039,9 @@ public class MyTorrentsView
 			}
 			if ( isIncompletedOnly ){
 					// if a download has removed from complete to incomplete then make it obvious
-				Long prev_removed = (Long)dm.getUserData( KEY_DM_REMOVED_FROM_COMPLETE_TABLE_TIME );
+				Long[] prev_removed = (Long[])dm.getUserData( KEY_DM_REMOVED_FROM_COMPLETE_TABLE_TIME );
 				if ( prev_removed != null ){
-					if ( SystemTime.getMonotonousTime() - prev_removed < 5000 ){						
+					if ( SystemTime.getMonotonousTime() - prev_removed[0] < 5000 ){						
 						dm.requestAttention();
 					}
 				}
@@ -4084,7 +4092,16 @@ public class MyTorrentsView
 			
 			DownloadManager dm = (DownloadManager)row.getDataSource( true );
 			
-			dm.setUserData( KEY_DM_REMOVED_FROM_COMPLETE_TABLE_TIME, SystemTime.getMonotonousTime());
+			Long[] data = (Long[])dm.getUserData( KEY_DM_REMOVED_FROM_COMPLETE_TABLE_TIME );
+			
+			if ( data == null ){
+				
+				data = new Long[]{ 0L };
+				
+				dm.setUserData( KEY_DM_REMOVED_FROM_COMPLETE_TABLE_TIME, data );
+			}
+			
+			 data[0] = SystemTime.getMonotonousTime();
 		}
 		
 		TableRowCore[] selected = tv.getSelectedRows();
