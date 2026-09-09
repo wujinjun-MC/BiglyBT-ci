@@ -228,20 +228,33 @@ public class BDecoder
 
 		throws IOException
 	{
-		Object	res = useNewDecoder
-				? decodeInputStream2(data, "", 0, internKeys)
-				: decodeInputStream(data, "", 0, internKeys);
+		try{
+			Object	res = useNewDecoder
+					? decodeInputStream2(data, "", 0, internKeys)
+					: decodeInputStream(data, "", 0, internKeys);
+	
+			if ( res == null ){
+	
+				throw( new BEncodingException( "BDecoder: zero length file" ));
+	
+			}else if ( !(res instanceof Map )){
+	
+				throw( new BEncodingException( "BDecoder: top level isn't a Map" ));
+			}
+	
+			return((Map<String,Object>)res );
+			
+		}catch( IOException e ){
+			
+			throw( e );
+			
+		}catch( Throwable e ){
+			
+				// prevent potentially malicious errors from escaping
+				// e.g. stack overflow due to nested lists (credit to haoxucu)
 
-		if ( res == null ){
-
-			throw( new BEncodingException( "BDecoder: zero length file" ));
-
-		}else if ( !(res instanceof Map )){
-
-			throw( new BEncodingException( "BDecoder: top level isn't a Map" ));
+			throw( new IOException( e ));
 		}
-
-		return((Map<String,Object>)res );
 	}
 
 	private Map<String, Object>
@@ -250,20 +263,33 @@ public class BDecoder
 
 		throws IOException
 	{
-		Object res = useNewDecoder
-				? decodeInputStream2(data, "", 0, internKeys)
-				: decodeInputStream(data, "", 0, internKeys);
+		try{
+			Object res = useNewDecoder
+					? decodeInputStream2(data, "", 0, internKeys)
+					: decodeInputStream(data, "", 0, internKeys);
+	
+			if ( res == null ){
+	
+				throw( new BEncodingException( "BDecoder: zero length file" ));
+	
+			}else if ( !(res instanceof Map )){
+	
+				throw( new BEncodingException( "BDecoder: top level isn't a Map" ));
+			}
 
-		if ( res == null ){
-
-			throw( new BEncodingException( "BDecoder: zero length file" ));
-
-		}else if ( !(res instanceof Map )){
-
-			throw( new BEncodingException( "BDecoder: top level isn't a Map" ));
+			return((Map<String, Object>)res );
+			
+		}catch( IOException e ){
+			
+			throw( e );
+			
+		}catch( Throwable e ){
+			
+				// prevent potentially malicious errors from escaping
+				// e.g. stack overflow due to nested lists (credit to haoxucu)
+			
+			throw( new IOException( e ));
 		}
-
-		return((Map<String, Object>)res );
 	}
 
 	private Object

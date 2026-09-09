@@ -131,6 +131,24 @@ public class ImageRepository
 
 	private static final AsyncDispatcher	disk_dispatcher = new AsyncDispatcher( "FileIconDisk" );
 
+		// an entry only needs checking against the file once per session: the
+		// icon is served from the cache on every repaint, and stat'ing the file
+		// each time turns a scroll through a large library into thousands of
+		// filesystem hits
+
+	private static final Set<String>	disk_checked =
+		Collections.newSetFromMap(
+			new LinkedHashMap<String,Boolean>( 128, 0.75f, false )
+			{
+				@Override
+				protected boolean
+				removeEldestEntry(
+					Map.Entry<String,Boolean> eldest )
+				{
+					return( size() > DISK_INDEX_MAX );
+				}
+			});
+
 		// returns true once the on-disk index is available; kicks off the read
 		// the first time it is asked
 
@@ -392,11 +410,29 @@ public class ImageRepository
 		boolean 			minifolder,
 		Consumer<PathIcon>	icon_listener ) 
 	{
+		return( getIconFromExtension( file, ext, bBig, minifolder, true, icon_listener ));
+	}
+	
+	public static PathIcon 
+	getIconFromExtension(
+		File				file, 
+		String				ext, 
+		boolean				bBig,
+		boolean 			minifolder,
+		boolean				file_complete,
+		Consumer<PathIcon>	icon_listener ) 
+	{
 			// when nothing can be resolved we fall back to a stand-in; for a
 			// directory that has to be the folder icon, since callers can't tell
 			// the transparent one apart from a real answer and will cache it
 
 		String fallback_key = ( minifolder || ext.equals( "-folder" ))? "folder": "transparent";
+
+			// the folder image is a real answer for a directory; the transparent
+			// one only means we couldn't get an icon this time round, so mark it
+			// temporary and callers won't cache it as though it were resolved
+
+		boolean fallback_is_placeholder = fallback_key.equals( "transparent" );
 
 		Image image = null;
 
@@ -428,7 +464,7 @@ public class ImageRepository
 
 			if ( per_file_icon ){
 
-				IconFileKey file_key = new IconFileKey( file, bBig, minifolder );
+				IconFileKey file_key = new IconFileKey( file, bBig, minifolder, file_complete );
 
 				PerFileContent pfc;
 				
@@ -473,7 +509,7 @@ public class ImageRepository
 						// nothing in memory, but it may have been resolved in an
 						// earlier session
 
-					Image from_disk = getIconFromDisk( file, file_key );
+					Image from_disk = file_complete? getIconFromDisk( file, file_key ): null;
 					
 					if ( from_disk != null ){
 
@@ -559,7 +595,7 @@ public class ImageRepository
 					
 					if ( ignore_icon_exts.contains( ext.toLowerCase( Locale.US  ))){
 						
-						return( new PathIcon( ImageLoader.getInstance().getImage( fallback_key )));
+						return( new PathIcon( ImageLoader.getInstance().getImage( fallback_key ), fallback_is_placeholder ));
 					}
 					
 					try {
@@ -647,7 +683,7 @@ public class ImageRepository
 				return( new PathIcon( ImageLoader.getInstance().getImage( "folder" )));
 			}
 
-			return( new PathIcon( ImageLoader.getInstance().getImage( fallback_key )));
+			return( new PathIcon( ImageLoader.getInstance().getImage( fallback_key ), fallback_is_placeholder ));
 		}
 		return( new PathIcon( image ));
 	}
@@ -756,6 +792,8 @@ public class ImageRepository
 					synchronized( ImageRepository.class ){
 
 						disk_index.remove( disk_key );
+					
+						disk_checked.remove( disk_key );
 					}
 
 					saveDiskIndex();
@@ -771,7 +809,17 @@ public class ImageRepository
 				per_file_content_keys.put( file_key, new PerFileContent( PFC_OK, content_key ));
 			}
 
-			scheduleDiskStaleCheck( file, file_key, disk_key, bits[1], bits[2] );
+			boolean check_needed;
+
+			synchronized( ImageRepository.class ){
+
+				check_needed = disk_checked.add( disk_key );
+			}
+
+			if ( check_needed ){
+
+				scheduleDiskStaleCheck( file, file_key, disk_key, bits[1], bits[2] );
+			}
 
 			return( image );
 
@@ -1079,8 +1127,16 @@ public class ImageRepository
 							
 							if ( type == PFC_NONE ){
 								
-								per_file_content_keys.put( file_key, new PerFileContent( PFC_NONE, null ));
+								PerFileContent pfc = per_file_content_keys.get( file_key );
 								
+								if ( pfc != null && pfc.type == PFC_NONE ){
+									
+									pfc.setFailed();
+									
+								}else{
+									
+									per_file_content_keys.put( file_key, new PerFileContent( PFC_NONE, null ));
+								}
 							}else{
 								
 								PerFileContent pfc = per_file_content_keys.get( file_key );
@@ -1183,7 +1239,10 @@ public class ImageRepository
 					per_file_content_keys.put( file_key, pfc );
 				}
 
-				storeIconOnDisk( file, file_key, content_key, existing );
+				if ( file_key.isFileComplete()){
+
+					storeIconOnDisk( file, file_key, content_key, existing );
+				}
 
 				return( existing );
 			}
@@ -1200,7 +1259,10 @@ public class ImageRepository
 				per_file_content_keys.put( file_key, new PerFileContent( PFC_OK, content_key ));
 			}
 			
-			storeIconOnDisk( file, file_key, content_key, icon );
+			if ( file_key.isFileComplete()){
+
+				storeIconOnDisk( file, file_key, content_key, icon );
+			}
 			
 			return( icon );
 			
@@ -1288,6 +1350,24 @@ public class ImageRepository
 		boolean				minifolder,
 		Consumer<PathIcon>	icon_listener ) 
 	{
+		return( getPathIcon( path, isFile, bBig, minifolder, true, icon_listener ));
+	}
+	
+		// a file that is still being written has no embedded icon to read, so
+		// the shell hands back the generic one for the type. cached under the
+		// same key as the finished file that placeholder would stay put once
+		// the download completed, so the two are kept apart and the finished
+		// file simply misses the cache and resolves properly.
+	
+	public static PathIcon 
+	getPathIcon(
+		String				path, 
+		Boolean				isFile,
+		boolean				bBig,
+		boolean				minifolder,
+		boolean				file_complete,
+		Consumer<PathIcon>	icon_listener ) 
+	{
 		if (path == null){
 			return( new PathIcon( null ));
 		}
@@ -1328,7 +1408,7 @@ public class ImageRepository
 					key = ext;
 
 					if (noAWT)
-						return getIconFromExtension(file, ext, bBig, minifolder, icon_listener);
+						return getIconFromExtension(file, ext, bBig, minifolder, file_complete, icon_listener);
 
 					// case-insensitive file systems
 					for (int i = 0; i < noCacheExtList.length; i++) {
@@ -1426,7 +1506,7 @@ public class ImageRepository
 			return( new PathIcon( ImageLoader.getInstance().getImage("folder")));
 		}
 
-		return getIconFromExtension(file, ext, bBig, minifolder, icon_listener);
+		return getIconFromExtension(file, ext, bBig, minifolder, file_complete, icon_listener);
 	}
 
 	private static LocationProvider	flag_provider;
@@ -1775,6 +1855,15 @@ public class ImageRepository
 			boolean		big,
 			boolean		minifolder )
 		{
+			this( file, big, minifolder, true );
+		}
+		
+		IconFileKey(
+			File		file,
+			boolean		big,
+			boolean		minifolder,
+			boolean		file_complete )
+		{
 			file_key = new StringInterner.FileKey( file );
 			
 			short mod = 0;
@@ -1785,7 +1874,16 @@ public class ImageRepository
 			if ( minifolder ){
 				mod += 2;
 			}
+			if ( !file_complete ){
+				mod += 4;
+			}
 			modifier = (byte)mod;
+		}
+		
+		boolean
+		isFileComplete()
+		{
+			return(( modifier & 4 ) == 0 );
 		}
 		
 		public int
@@ -1824,7 +1922,7 @@ public class ImageRepository
 			type	= _type;
 			key		= _key;
 			
-			if ( type == PFC_TIMEOUT || type == PFC_BUSY ){
+			if ( type != PFC_OK ){
 				
 				fail_count = 1;
 			}
@@ -1846,7 +1944,15 @@ public class ImageRepository
 
 			if ( type == PFC_TIMEOUT ){
 				
-				long delay = fail_count * ( 30*1000 + RandomUtils.nextInt( 10*1000 ));
+					// a lookup that times out isn't abandoned - it finishes in the
+					// background and leaves the image in Win32UIEnhancer's pending
+					// cache, which holds it for a minute. backing off past that
+					// window means arriving after the image has been discarded and
+					// starting the whole thing again, so on a file too big to read
+					// inside the timeout the icon never lands. cap the wait below
+					// the window rather than growing indefinitely.
+				
+				long delay = Math.min( fail_count, 2 ) * ( 20*1000 + RandomUtils.nextInt( 5*1000 ));
 				
 				return( elapsed > delay );
 				
@@ -1856,6 +1962,20 @@ public class ImageRepository
 					// quickly; back off a little if it keeps missing
 
 				long delay = Math.min( fail_count, 10 ) * ( 1000 + RandomUtils.nextInt( 500 ));
+				
+				return( elapsed > delay );
+				
+			}else if ( type == PFC_NONE ){
+				
+					// the lookup ran and produced nothing, which usually means
+					// the file has no icon of its own. usually, but not always -
+					// the shell can come back empty for other reasons - and with
+					// no retry at all such a row keeps its stand-in for the whole
+					// session, with nothing able to replace it. retry, but widen
+					// the gap each time so a file that really has no icon isn't
+					// asked about forever.
+
+				long delay = Math.min( fail_count, 10 ) * ( 60*1000 + RandomUtils.nextInt( 15*1000 ));
 				
 				return( elapsed > delay );
 				
