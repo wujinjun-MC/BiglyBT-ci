@@ -266,11 +266,30 @@ public interface MultipleDocumentInterface
 		Runnable	r );
 	
 	public interface
+	VTIMdiHelper
+	{
+		public void
+		setViewTitleInfo(
+			ViewTitleInfo		vti );
+		
+		public MdiEntryVitalityImage 
+		addVitalityImage(String imageID);
+		
+		public void
+		redraw();
+		
+		public void
+		addListener(
+			MdiEntryDropListener	l );
+	}
+	
+	public interface
 	VTIFactory
 	{
 		public ViewTitleInfo
 		create(
-			Object		ds );
+			VTIMdiHelper	mdiEntry,
+			Object			ds );
 	}
 	
 	public void
@@ -280,7 +299,8 @@ public interface MultipleDocumentInterface
 	
 	public ViewTitleInfo
 	createViewTitleInfo(
-		String 		id,
-		Object		ds );
+		String 			id,
+		VTIMdiHelper	mdiEntry,
+		Object			ds );
 	
 }
