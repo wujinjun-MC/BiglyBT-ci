@@ -48,6 +48,7 @@ TOTorrentCreateV2Impl
 	private int		file_index	= 0;
 	
 	private int		synthetic_pad_file_count;
+	private long	synthetic_pad_file_done_at = -1;
 	
 	private int		files_ignored;	
 	
@@ -209,7 +210,15 @@ TOTorrentCreateV2Impl
 		
 		if ( total_file_size % piece_size != 0 ){
 			
-			synthetic_pad_file_count++;
+				// prevent zero length files (which don't generate pad files ) from incorrectly
+				// incrementing the pad file count
+			
+			if ( synthetic_pad_file_done_at != total_file_size ){
+			
+				synthetic_pad_file_done_at = total_file_size;
+			
+				synthetic_pad_file_count++;
+			}
 		}
 		
 		FileDetails result = handleFile( file, relative_path );
@@ -486,13 +495,21 @@ TOTorrentCreateV2Impl
 				
 				TOTorrentFileImpl[]	v1_files = torrent.getFiles();
 				
-				if ( v1_files.length == v2_files.size()){
+					// some torrents have an unnecessary trailing pad file in the V1 file list
 				
-					for ( int i=0; i<v1_files.length; i++){
+				int num_v1 = v1_files.length;
+				int	num_v2 = v2_files.size();
+				
+				if ( 	( num_v1 == num_v2 ) || 
+						( num_v1 == num_v2 + 1 && v1_files[num_v1-1].isPadFile())){
+				
+					for ( int i=0; i<num_v2; i++){
 					
 						TOTorrentFileImpl v1_file = v1_files[i];
 						
-						if ( !v1_file.isPadFile()){
+							// pad files and zero length files have no hash tree
+						
+						if ( !v1_file.isPadFile() && v1_file.getLength() > 0 ){
 						
 							TOTorrentFileImpl v2_file = v2_files.get(i);
 							

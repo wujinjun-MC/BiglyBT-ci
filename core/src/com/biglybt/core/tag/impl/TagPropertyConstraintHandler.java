@@ -86,6 +86,8 @@ TagPropertyConstraintHandler
 
 	private static final Object DM_PEER_SETS					= new Object();
 	private static final Object DM_RATES						= new Object();
+	private static final Object DM_TAG_POSITION1				= new Object();
+	private static final Object DM_TAG_POSITION2				= new Object();
 	
 	private static final Object DM_TRACKERS						= new Object();
 	
@@ -113,7 +115,7 @@ TagPropertyConstraintHandler
 	final Map<Tag,Map<DownloadManager,Long>>			apply_history 		= new HashMap<>();
 
 	private final AsyncDispatcher	dispatcher = new AsyncDispatcher( "tag:constraints" );
-
+	
 	private final FrequencyLimitedDispatcher	freq_lim_dispatcher =
 		new FrequencyLimitedDispatcher(
 			new AERunnable()
@@ -412,27 +414,30 @@ TagPropertyConstraintHandler
 
 					processing_queue.clear();
 
-					for ( Object[] entry: to_do ){
-
-						TagConstraint 	constraint 	= (TagConstraint)entry[0];
-						Object			target		= entry[1];
-						boolean			is_new		= (Boolean)entry[2];
-						
-						try{
-
-							if ( target instanceof DownloadManager ){
-
-								constraint.apply((DownloadManager)target, is_new );
-
-							}else{
-
-								constraint.apply((List<DownloadManager>)target);
+					dispatcher.dispatch(()->{
+												
+						for ( Object[] entry: to_do ){
+	
+							TagConstraint 	constraint 	= (TagConstraint)entry[0];
+							Object			target		= entry[1];
+							boolean			is_new		= (Boolean)entry[2];
+							
+							try{
+	
+								if ( target instanceof DownloadManager ){
+	
+									constraint.apply((DownloadManager)target, is_new );
+	
+								}else{
+	
+									constraint.apply((List<DownloadManager>)target);
+								}
+							}catch( Throwable e ){
+	
+								Debug.out( e );
 							}
-						}catch( Throwable e ){
-
-							Debug.out( e );
 						}
-					}
+					});
 				}
 			}else{
 
@@ -1321,7 +1326,7 @@ TagPropertyConstraintHandler
 		
 		return( true );
 	}
-
+	
 	public TagConstraint
 	compileConstraint(
 		String		expr )
@@ -2117,7 +2122,7 @@ TagPropertyConstraintHandler
 								
 				activity_average.addValue( 1 );
 				
-				List<Tag> dm_tags = handler.tag_manager.getTagsForTaggable( dm );
+				Set<Tag> dm_tags = new HashSet<>( handler.tag_manager.getTagsForTaggable( dm ));
 	
 				if ( expr == null ){
 				
@@ -2232,7 +2237,7 @@ TagPropertyConstraintHandler
 			eval(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				StringBuilder		debug );
 
 			public String
@@ -2248,7 +2253,7 @@ TagPropertyConstraintHandler
 			eval(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				StringBuilder		debug )
 			{
 				if ( debug != null ){
@@ -2276,7 +2281,7 @@ TagPropertyConstraintHandler
 			eval(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				StringBuilder		debug )
 			{
 				if ( debug != null ){
@@ -2334,7 +2339,7 @@ TagPropertyConstraintHandler
 			eval(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				StringBuilder		debug )
 			{
 				return( false );
@@ -2512,7 +2517,7 @@ TagPropertyConstraintHandler
 			eval(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				StringBuilder		debug )
 			{
 				if ( debug != null ){
@@ -2556,7 +2561,7 @@ TagPropertyConstraintHandler
 			eval(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				StringBuilder		debug )
 			{
 				if ( debug != null ){
@@ -2639,7 +2644,7 @@ TagPropertyConstraintHandler
 			eval(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				StringBuilder		debug )
 			{
 				if ( debug != null ){
@@ -2726,7 +2731,7 @@ TagPropertyConstraintHandler
 			eval(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				StringBuilder		debug )
 			{
 				if ( debug != null ){
@@ -3691,7 +3696,7 @@ TagPropertyConstraintHandler
 			eval(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				StringBuilder		debug )
 			{
 				if ( debug!=null){
@@ -3711,7 +3716,7 @@ TagPropertyConstraintHandler
 			evalSupport(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				StringBuilder		debug )
 			{
 				int num_params = params.length;
@@ -3720,10 +3725,12 @@ TagPropertyConstraintHandler
 					case FT_HAS_TAG:{
 
 						String tag_name = getStringParam( params, 0, debug );
+						
+						List<Tag> hits = handler.tag_manager.getTagsByName( tag_name, true );
+						
+						for ( Tag t: hits ){
 
-						for ( Tag t: tags ){
-
-							if ( t.getTagName( true ).equals( tag_name )){
+							if ( tags.contains( t )){
 
 								return( true );
 							}
@@ -3735,9 +3742,9 @@ TagPropertyConstraintHandler
 							
 							if ( ps_tags != null ){
 								
-								for ( Tag t: ps_tags ){
+								for ( Tag t: hits ){
 
-									if ( t.getTagName( true ).equals( tag_name )){
+									if ( ps_tags.contains( t )){
 
 										return( true );
 									}
@@ -3864,114 +3871,123 @@ TagPropertyConstraintHandler
 							setError( "Tag '" + tag_name + "' not found" );
 							
 							return( -1 );
+						}
+						
+						if ( !target.hasTaggable( dm )){
 							
-						}else{
+							return( -1 );	// not in tag
+						}
+						
+						int sort	= 1;
+						
+						Object DM_KEY = DM_TAG_POSITION1;
+						
+						if ( params.length > 1 ){
+						
+							sort = getNumericParam( params, 1, debug ).intValue();
 							
-							int sort;
+							if ( sort == 2 ){
 							
-							if ( params.length == 1 ){
-							
+								DM_KEY = DM_TAG_POSITION2;
+								
+							}else{
+								
 								sort = 1;
-								
-							}else{
-								
-								sort = getNumericParam( params, 1, debug ).intValue();
 							}
+						}
+						
+							// results depend on dm position and tag membership so we use their
+							// mutation counts to indicate cache validity
+						
+						int dm_mut = handler.core.getGlobalManager().getDownloadManagersMutationCount();
+						
+						int tag_mut = target.getTaggablesMutationCount();
+						
+						int overall_mut = dm_mut + tag_mut;
+													
+						Map<Tag,int[]> cache = (Map<Tag,int[]>)dm.getUserData( DM_KEY );
+						
+						if ( cache != null ){
 							
-							Set<Taggable> dms = target.getTagged();
+							int[] entry = cache.get( target );
 							
-							if ( !dms.contains( dm )){
+							if ( entry != null ){
 								
-								return( -1 );	// not present
-							}
-							
-							if ( sort == 1 ){
-								
-								int my_position = dm.getPosition();
-								
-								int tag_position = 0;
-								
-								boolean found = false;
-								
-								for ( Taggable t: dms ){
+								if ( entry[0] == overall_mut ){
 									
-									DownloadManager this_dm = (DownloadManager)t;
-									
-									if ( t == dm ){
-										
-										found = true;
-										
-									}else{
-										
-										int this_pos = this_dm.getPosition();
-										
-										if ( this_pos < my_position ){
-											
-											tag_position++;
-										}
-									}
-								}
-								
-								if ( found ){
-									
-									return( tag_position );
-									
-								}else{
-									
-									return( -1 );
-								}
-							}else{
-								
-								long my_time = target.getTaggableAddedTime( dm );
-								
-								if ( my_time == -1 ){
-									
-									return( -1 );	// not in tag
-								}
-								
-									// need to mix in position as if a number of downloads are added to a tag at the same time (drag+drop a bunch)
-									// then they most likely end up with identical times
-								
-								my_time += dm.getPosition();
-								
-								int tag_position = 0;
-								
-								boolean found = false;
-								
-								for ( Taggable t: dms ){
-																		
-									if ( t == dm ){
-											
-										found = true;
-									
-									}else{
-										
-										long this_time = target.getTaggableAddedTime( t );
-										
-										if ( this_time != -1 ){
-											
-											DownloadManager this_dm = (DownloadManager)t;
-											
-											this_time += this_dm.getPosition();
-											
-											if ( this_time < my_time ){
-												
-												tag_position++;
-											}
-										}
-									}
-								}
-								
-								if ( found ){
-									
-									return( tag_position );
-									
-								}else{
-									
-									return( -1 );
+									return( entry[1] );
 								}
 							}
 						}
+						
+							// cache the position for all entries on the tag in one go as
+							// it is almost certain that their tag-position is also about to
+							// be asked for
+						
+						Set<Taggable> dms = target.getTagged();
+						
+						DownloadManager[] dms1 = dms.toArray( new DownloadManager[dms.size()]);
+						
+						Comparator<DownloadManager> comp;
+						
+						if ( sort == 1 ){
+							
+							comp = ( dm1, dm2 )->{
+								
+								return( Integer.compare( dm1.getPosition(), dm2.getPosition()));
+							};
+						}else{
+							Tag f_target = target;
+							
+							comp = ( dm1, dm2 )->{
+						
+								// need to mix in position as if a number of downloads are added to a tag at the same time (drag+drop a bunch)
+								// then they most likely end up with identical times
+
+								long t1 = f_target.getTaggableAddedTime( dm1 );
+								if ( t1 == -1 ){
+									t1 = Long.MAX_VALUE;
+								}else{
+									t1 += dm1.getPosition();
+								}
+								
+								long t2 = f_target.getTaggableAddedTime( dm2 );
+								if ( t2 == -1 ){
+									t2 = Long.MAX_VALUE;
+								}else{
+									t2 += dm2.getPosition();
+								}
+								
+								return( Long.compare( t1, t2 ));
+							};
+						}
+			  			
+						Arrays.sort( dms1, comp );
+						
+						int result = -1;
+						
+						for ( int i=0;i<dms1.length;i++){
+							
+							DownloadManager this_dm = dms1[i];
+							
+							cache = (Map<Tag,int[]>)this_dm.getUserData( DM_KEY );
+							
+							if ( cache == null ){
+								
+								cache = new HashMap<>();
+								
+								this_dm.setUserData( DM_KEY, cache );
+							}
+							
+							cache.put( target, new int[]{ overall_mut, i });
+	
+							if ( this_dm == dm ){
+								
+								result = i;
+							}
+						}
+							
+						return( result );
 					}
 					case FT_GET_TAG_WEIGHT:{
 						
@@ -4871,7 +4887,7 @@ TagPropertyConstraintHandler
 			getWhatever(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				Object[]			args,
 				int					index,
 				StringBuilder		debug )
@@ -5029,7 +5045,7 @@ TagPropertyConstraintHandler
 			getString(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				Object[]			args,
 				int					index,
 				StringBuilder		debug )
@@ -5043,7 +5059,7 @@ TagPropertyConstraintHandler
 			getStrings(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				Object[]			args,
 				int					index,
 				StringBuilder		debug )
@@ -5142,7 +5158,7 @@ TagPropertyConstraintHandler
 			private Object
 			getKeywordValue(
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				String				str )
 			{
 				int[] kw_details = keyword_map.get( str.toLowerCase( Locale.US ));
@@ -5762,13 +5778,14 @@ TagPropertyConstraintHandler
 					
 						String[] result = new String[tags.size()];
 						
-						for ( int i=0;i<tags.size();i++){
-							Tag tag = tags.get(i);
+						int i=0;
+						
+						for ( Tag tag: tags ){
 							
 							if ( tag == tag_maybe_null ){
-								result[i] = "";
+								result[i++] = "";
 							}else{
-								result[i] = tag.getTagName( true );
+								result[i++] = tag.getTagName( true );
 							}
 						}
 						
@@ -5989,7 +6006,7 @@ TagPropertyConstraintHandler
 			getNumeric(
 				Map<String,Object>	context,
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				Object[]			args,
 				int					index,
 				StringBuilder		debug )
@@ -6058,7 +6075,7 @@ TagPropertyConstraintHandler
 			private Number
 			getNumericSupport(
 				DownloadManager		dm,
-				List<Tag>			tags,
+				Set<Tag>			tags,
 				Object[]			args,
 				int					index )
 			{
