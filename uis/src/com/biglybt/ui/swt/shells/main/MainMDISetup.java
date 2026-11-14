@@ -718,24 +718,73 @@ public class MainMDISetup
 											
 										}else if ( propertyID == TITLE_INDICATOR_TEXT ){
 
-											int	num = 0;
+											int	num1 = 0;
+											int	num2 = 0;
 
-											for ( ChatInstance chat: bp.getChats()){
+											List<ChatInstance> chats = bp.getChats();
+											
+											for ( ChatInstance chat: chats){
 
+												if ( !chat.isInvisible()){
+													
+													num1++;
+												}
+												
 												if ( chat.getMessageOutstanding()){
 
-													num++;
+													num2++;
 												}
 											}
-
-											if ( num > 0 ){
-
-												return( String.valueOf( num ));
-
+											
+											if ( COConfigurationManager.getBooleanParameter( "chat.overview.mdi.show.total" )){
+												
+												return( num2 + " | " + num1 );
+												
 											}else{
-
-												return( null );
+												if ( num2 > 0 ){
+													
+													return( String.valueOf( num2 ));
+													
+												}else{
+													
+													return( null );
+												}
 											}
+										}else if ( propertyID == TITLE_INDICATOR_TEXT_TOOLTIP ){
+											
+											int waiting	= 0;
+											int	pub		= 0;
+											int	anon	= 0;
+
+											List<ChatInstance> chats = bp.getChats();
+											
+											for ( ChatInstance chat: chats){
+
+												if ( !chat.isInvisible()){
+													
+													if ( chat.getMessageOutstanding()){
+														
+														waiting++;
+													}
+													
+													if ( chat.isAnonymous()){
+
+														anon++;
+														
+													}else{
+														
+														pub++;
+													}
+												}
+											}
+											
+											return(
+												MessageText.getString( "TableColumn.header.chat.msg.out") + ": " + waiting + ", " +
+												MessageText.getString( "SpeedView.stats.total" ) + ": " + (pub+anon) + " (" +
+												MessageText.getString( "label.public" ) + ": " + pub + ", " +
+												MessageText.getString( "label.anon" ) + ": " + anon + ")");
+														
+											
 										}else if ( propertyID == TITLE_INDICATOR_COLOR){
 
 											for ( ChatInstance chat: bp.getChats()){
@@ -766,7 +815,25 @@ public class MainMDISetup
 
 						MenuManager menu_manager = pi.getUIManager().getMenuManager();
 						
-						MenuItem mi = menu_manager.addMenuItem( parentID, "MainWindow.menu.view.configuration" );
+						List<MenuItem> mis = new ArrayList<>();
+						
+						
+						MenuItem mi = menu_manager.addMenuItem( parentID, "menu.show.total" );
+						mis.add( mi );
+						mi.setDisposeWithUIDetach(UIInstance.UIT_SWT);
+						mi.setStyle( MenuItem.STYLE_CHECK );
+						mi.setData( COConfigurationManager.getBooleanParameter( "chat.overview.mdi.show.total" ));
+						mi.addListener((menu,target)->{
+							COConfigurationManager.setParameter( "chat.overview.mdi.show.total", ((Boolean)menu.getData()).booleanValue());
+						});
+								
+						mi = menu_manager.addMenuItem( parentID, "chat.overview.mdi.sep" );
+						mis.add( mi );
+						mi.setDisposeWithUIDetach(UIInstance.UIT_SWT);
+						mi.setStyle( MenuItem.STYLE_SEPARATOR );
+						
+						mi = menu_manager.addMenuItem( parentID, "MainWindow.menu.view.configuration" );
+						mis.add( mi );
 						mi.setDisposeWithUIDetach(UIInstance.UIT_SWT);
 
 						mi.addListener(
@@ -876,7 +943,10 @@ public class MainMDISetup
 								{
 									timer.cancel();
 									
-									mi.remove();
+									for ( MenuItem mi: mis ){
+										
+										mi.remove();
+									}
 								}
 							});
 

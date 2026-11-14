@@ -275,7 +275,7 @@ public class StartStopRulesDefaultPlugin implements Plugin,
 		
 		if ( tag_manager != null && tag_manager.isEnabled()){
 			
-			Map<TagFeatureRateLimit,Integer>	tags_with_limit	= new IdentityHashMap<>();
+			Map<TagFeatureRateLimit,int[]>	tags_with_limit	= new IdentityHashMap<>();
 
 			TagType tt = tag_manager.getTagType( TagType.TT_DOWNLOAD_MANUAL );
 			
@@ -316,13 +316,14 @@ public class StartStopRulesDefaultPlugin implements Plugin,
 						
 							TagFeatureRateLimit t = (TagFeatureRateLimit)tag;
 							
-							int max = t.getMaxActiveDownloads() + t.getMaxActiveSeeds();
+							int max		= t.getMaxActiveDownloads() + t.getMaxActiveSeeds();
+							int min_lim	= t.getMinActiveDownloadingSpeed();
 							
-							if ( max > 0 ){
+							if ( max > 0 || min_lim >= 0 ){
 									
 								synchronized( tags_with_limit ){
 								
-									tags_with_limit.put( t, max );
+									tags_with_limit.put( t, new int[]{ max, min_lim });
 									
 									tag.addTagListener( tag_listener, false );
 									
@@ -342,27 +343,32 @@ public class StartStopRulesDefaultPlugin implements Plugin,
 							
 							TagFeatureRateLimit t = (TagFeatureRateLimit)tag;
 							
-							int max = t.getMaxActiveDownloads() + t.getMaxActiveSeeds();
-
-							if ( max > 0 ){
+							int max		= t.getMaxActiveDownloads() + t.getMaxActiveSeeds();
+							int min_lim	= t.getMinActiveDownloadingSpeed();
+							
+							if ( max > 0 || min_lim >= 0 ){
 								
 								boolean changed = false;
 								
 								synchronized( tags_with_limit ){
 								
-									Integer old = tags_with_limit.get( t );
+									int[] old = tags_with_limit.get( t );
 									
 									if ( old == null ){
 										
-										tags_with_limit.put( t, max );
+										tags_with_limit.put( t, new int[]{ max, min_lim });
 										
 										tag.addTagListener( tag_listener, false );
 										
 										tagsHaveDLorCDLimits = true;
 										
-									}else if ( old != max ){
+										changed = true;
 										
-										tags_with_limit.put( t, max );
+									}else if ( old[0] != max || old[1] != min_lim ){
+										
+										tags_with_limit.put( t, new int[]{ max, min_lim });
+										
+										changed = true;
 									}
 								}
 								
@@ -484,6 +490,38 @@ public class StartStopRulesDefaultPlugin implements Plugin,
 				public void UIAttached(UIInstance instance) {
 					TableManager tm = pi.getUIManager().getTableManager();
 
+					tm.registerColumn( 
+							DownloadTypeComplete.class, 
+							"SeedingRank",
+							(column)->{
+								
+								column.setAlignment( TableColumn.ALIGN_TRAIL );
+								column.setPosition( TableColumn.POSITION_LAST );
+								column.setWidth( 80 );
+								column.setRefreshInterval( TableColumn.INTERVAL_LIVE );
+								
+								TableCellRefreshListener columnListener = new SeedingRankColumnListener();
+								
+								column.addCellRefreshListener(columnListener);
+							});
+
+					tm.registerColumn( 
+						DownloadTypeIncomplete.class, 
+						"DownloadingRank",
+						(column)->{
+							
+							column.setMinimumRequiredUserMode( 1 );
+							column.setAlignment( TableColumn.ALIGN_TRAIL );
+							column.setPosition( TableColumn.POSITION_INVISIBLE );
+							column.setWidth( 80 );
+							column.setRefreshInterval( TableColumn.INTERVAL_LIVE );
+							
+							TableCellRefreshListener columnListener = new DownloadingRankColumnListener( StartStopRulesDefaultPlugin.this );
+							
+							column.addCellRefreshListener(columnListener);
+						});
+					
+					/*
 					String[] tables1 = { TableManager.TABLE_MYTORRENTS_COMPLETE, TableManager.TABLE_MYTORRENTS_ALL_SMALL };
 					
 					for ( String table: tables1 ){
@@ -515,7 +553,8 @@ public class StartStopRulesDefaultPlugin implements Plugin,
 	
 						tm.addColumn( downloadingRankColumn );
 					}
-
+					*/
+					
 					if ( instance.getUIType().equals(UIInstance.UIT_SWT) ){
 
 						try{
